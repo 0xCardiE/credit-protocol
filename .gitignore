@@ -1,0 +1,17 @@
+# Compiler files
+cache/
+out/
+
+# Environment
+.env
+
+# Node
+node_modules/
+frontend/node_modules/
+frontend/.next/
+
+# Coverage
+lcov.info
+
+# OS
+.DS_Store
