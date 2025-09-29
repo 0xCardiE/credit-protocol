@@ -2,8 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAccount, useConnect, useDisconnect } from "wagmi";
-import { shortenAddress } from "@/lib/utils";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
@@ -14,9 +13,6 @@ const NAV_ITEMS = [
 
 export function Navbar() {
   const pathname = usePathname();
-  const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
 
   return (
     <nav className="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-50">
@@ -48,23 +44,7 @@ export function Navbar() {
               })}
             </div>
           </div>
-          <div>
-            {isConnected ? (
-              <button
-                onClick={() => disconnect()}
-                className="px-4 py-2 rounded-lg bg-slate-100 text-slate-700 text-sm font-medium hover:bg-slate-200 transition-colors"
-              >
-                {shortenAddress(address!)}
-              </button>
-            ) : (
-              <button
-                onClick={() => connectors[0] && connect({ connector: connectors[0] })}
-                className="px-4 py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 transition-colors"
-              >
-                Connect Wallet
-              </button>
-            )}
-          </div>
+          <ConnectButton />
         </div>
       </div>
     </nav>
