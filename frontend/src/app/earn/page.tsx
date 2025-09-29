@@ -255,9 +255,21 @@ export default function EarnPage() {
           ) : (
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Shares (honeyUSDC)
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-slate-700">
+                    Shares (honeyUSDC)
+                  </label>
+                  {shareBalance !== undefined && shareBalance > 0n && (
+                    <button
+                      onClick={() =>
+                        setWithdrawShares((Number(shareBalance) / 1e6).toString())
+                      }
+                      className="text-xs font-medium text-amber-600 hover:text-amber-700"
+                    >
+                      MAX
+                    </button>
+                  )}
+                </div>
                 <input
                   type="number"
                   value={withdrawShares}
@@ -265,8 +277,11 @@ export default function EarnPage() {
                   placeholder="0.00"
                   className="w-full rounded-lg border border-slate-300 px-4 py-3 text-lg focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                 />
+                <p className="mt-2 text-xs text-slate-400">
+                  Available: {formatShares(shareBalance)} honeyUSDC
+                </p>
                 {previewRedeem !== undefined && withdrawParsed > 0n && (
-                  <p className="mt-2 text-sm text-slate-500">
+                  <p className="mt-1 text-sm text-slate-500">
                     You will receive{" "}
                     <span className="font-medium text-slate-700">
                       {formatUSDC(previewRedeem)}
