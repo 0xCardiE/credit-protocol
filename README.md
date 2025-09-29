@@ -56,17 +56,6 @@ PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
 
 ## Deployment Guide (Sepolia & Base)
 
-### Prerequisites
-
-| What | Where to get it |
-|---|---|
-| **Foundry** | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` |
-| **Deployer wallet** | Any wallet with testnet ETH. Export the private key. |
-| **Sepolia ETH** | [sepoliafaucet.com](https://sepoliafaucet.com) or [cloud.google.com/web3/faucet](https://cloud.google.com/application/web3/faucet/ethereum/sepolia) |
-| **Base Sepolia ETH** | [faucet.base.org](https://www.base.org/faucet) (bridge from Sepolia) |
-| **RPC endpoint** | Free tier at [alchemy.com](https://alchemy.com) or [infura.io](https://infura.io) |
-| **Etherscan V2 API key** | [etherscan.io/myapikey](https://etherscan.io/myapikey) — one key covers all chains |
-
 ### Step 1 — Set up environment variables
 
 ```bash
@@ -146,23 +135,3 @@ forge verify-contract <DEPLOYED_ADDRESS> src/HoneyVault.sol:HoneyVault \
 
 Replace `--chain sepolia` with `--chain base` for Base.
 
-### Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| `EvmError: OutOfFunds` | Deployer wallet needs more testnet ETH |
-| Verification fails with 5xx | Etherscan is congested — wait a minute and run `forge verify-contract` manually |
-| `ETHERSCAN_API_KEY` not found | Make sure you ran `source .env` in the same terminal |
-| Wrong chain verification URL | Check `foundry.toml` `[etherscan]` section matches the chain you're deploying to |
-
----
-
-## Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Visit `http://localhost:3000` to interact with the protocol.
