@@ -54,9 +54,9 @@ export default function AdminPage() {
   const [recoverAmount, setRecoverAmount] = useState("");
 
   const { writeContract, data: txHash, isPending } = useWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const { isLoading: isConfirming, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash });
 
-  const { data: loanCount } = useReadContract({
+  const { data: loanCount, refetch: refetchLoanCount } = useReadContract({
     address: ADDRESSES.loanManager,
     abi: LOAN_MANAGER_ABI,
     functionName: "getLoanCount",
@@ -75,6 +75,12 @@ export default function AdminPage() {
   });
 
   const isManager = address && managerAddr && address.toLowerCase() === (managerAddr as string).toLowerCase();
+
+  useEffect(() => {
+    if (txSuccess) {
+      refetchLoanCount();
+    }
+  }, [txSuccess, refetchLoanCount]);
 
   useEffect(() => {
     async function fetchLoans() {
