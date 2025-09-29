@@ -2,6 +2,9 @@
 cache/
 out/
 
+# Broadcast artifacts (contain deployer addresses / tx hashes)
+broadcast/
+
 # Environment
 .env
 

@@ -10,3 +10,17 @@ optimizer_runs = 200
 line_length = 120
 tab_width = 4
 bracket_spacing = false
+
+# ── RPC Endpoints ──────────────────────────────────────────────
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
+base    = "${BASE_RPC_URL}"
+local   = "http://127.0.0.1:8545"
+
+# ── Etherscan Verification ─────────────────────────────────────
+# Etherscan V2 uses a single universal API key for all chains.
+# Set ETHERSCAN_API_KEY in your .env file.
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}", url = "https://api-sepolia.etherscan.io/api" }
+base    = { key = "${ETHERSCAN_API_KEY}", url = "https://api.basescan.org/api" }

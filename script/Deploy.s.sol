@@ -10,7 +10,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract Deploy is Script {
     function run() external {
-        vm.startBroadcast();
+        uint256 deployerKey = vm.envUint("PRIVATE_KEY");
+        vm.startBroadcast(deployerKey);
 
         MockUSDC usdc = new MockUSDC();
         console.log("MockUSDC:", address(usdc));
@@ -25,6 +26,7 @@ contract Deploy is Script {
         console.log("WithdrawalQueue:", address(withdrawalQueue));
 
         vault.setLoanManager(address(loanManager));
+        console.log("--- Deployment complete ---");
 
         vm.stopBroadcast();
     }
