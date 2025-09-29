@@ -1,10 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useAccount,
   useReadContract,
-  useReadContracts,
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi";
@@ -23,12 +22,31 @@ export default function EarnPage() {
   const [withdrawShares, setWithdrawShares] = useState("");
   const [mode, setMode] = useState<"deposit" | "withdraw">("deposit");
 
-  const { writeContract, data: txHash, isPending } = useWriteContract();
-  const { writeContract: writeApprove, data: approveTxHash, isPending: isApproving } = useWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
-  const { isLoading: isApprovingTx } = useWaitForTransactionReceipt({ hash: approveTxHash });
+  const {
+    writeContract: writeFaucet,
+    data: faucetTxHash,
+    isPending: isFaucetPending,
+  } = useWriteContract();
+  const { isLoading: isFaucetConfirming, isSuccess: faucetSuccess } =
+    useWaitForTransactionReceipt({ hash: faucetTxHash });
 
-  const { data: usdcBalance } = useReadContract({
+  const {
+    writeContract: writeApprove,
+    data: approveTxHash,
+    isPending: isApprovePending,
+  } = useWriteContract();
+  const { isLoading: isApproveConfirming, isSuccess: approveSuccess } =
+    useWaitForTransactionReceipt({ hash: approveTxHash });
+
+  const {
+    writeContract: writeVault,
+    data: vaultTxHash,
+    isPending: isVaultPending,
+  } = useWriteContract();
+  const { isLoading: isVaultConfirming, isSuccess: vaultSuccess } =
+    useWaitForTransactionReceipt({ hash: vaultTxHash });
+
+  const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
     address: ADDRESSES.mockUSDC,
     abi: MOCK_USDC_ABI,
     functionName: "balanceOf",
@@ -36,7 +54,7 @@ export default function EarnPage() {
     query: { enabled: !!address },
   });
 
-  const { data: shareBalance } = useReadContract({
+  const { data: shareBalance, refetch: refetchShares } = useReadContract({
     address: ADDRESSES.honeyVault,
     abi: HONEY_VAULT_ABI,
     functionName: "balanceOf",
@@ -44,13 +62,33 @@ export default function EarnPage() {
     query: { enabled: !!address },
   });
 
-  const { data: usdcAllowance } = useReadContract({
+  const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
     address: ADDRESSES.mockUSDC,
     abi: MOCK_USDC_ABI,
     functionName: "allowance",
     args: address ? [address, ADDRESSES.honeyVault] : undefined,
     query: { enabled: !!address },
   });
+
+  useEffect(() => {
+    if (approveSuccess) {
+      refetchAllowance();
+    }
+  }, [approveSuccess, refetchAllowance]);
+
+  useEffect(() => {
+    if (faucetSuccess) {
+      refetchBalance();
+    }
+  }, [faucetSuccess, refetchBalance]);
+
+  useEffect(() => {
+    if (vaultSuccess) {
+      refetchBalance();
+      refetchShares();
+      refetchAllowance();
+    }
+  }, [vaultSuccess, refetchBalance, refetchShares, refetchAllowance]);
 
   const depositParsed = parseUSDC(depositAmount);
   const withdrawParsed = parseUSDC(withdrawShares);
@@ -79,7 +117,8 @@ export default function EarnPage() {
     query: { enabled: !!address },
   });
 
-  const needsApproval = usdcAllowance !== undefined && depositParsed > 0n && usdcAllowance < depositParsed;
+  const needsApproval =
+    usdcAllowance !== undefined && depositParsed > 0n && usdcAllowance < depositParsed;
 
   function handleApprove() {
     writeApprove({
@@ -92,7 +131,7 @@ export default function EarnPage() {
 
   function handleDeposit() {
     if (!address) return;
-    writeContract({
+    writeVault({
       address: ADDRESSES.honeyVault,
       abi: HONEY_VAULT_ABI,
       functionName: "deposit",
@@ -102,7 +141,7 @@ export default function EarnPage() {
 
   function handleWithdraw() {
     if (!address) return;
-    writeContract({
+    writeVault({
       address: ADDRESSES.honeyVault,
       abi: HONEY_VAULT_ABI,
       functionName: "redeem",
@@ -111,7 +150,7 @@ export default function EarnPage() {
   }
 
   function handleFaucet() {
-    writeContract({
+    writeFaucet({
       address: ADDRESSES.mockUSDC,
       abi: MOCK_USDC_ABI,
       functionName: "faucet",
@@ -119,7 +158,9 @@ export default function EarnPage() {
     });
   }
 
-  const busy = isPending || isConfirming || isApproving || isApprovingTx;
+  const faucetBusy = isFaucetPending || isFaucetConfirming;
+  const approveBusy = isApprovePending || isApproveConfirming;
+  const vaultBusy = isVaultPending || isVaultConfirming;
 
   return (
     <div className="space-y-8">
@@ -180,26 +221,34 @@ export default function EarnPage() {
                 />
                 {previewDeposit !== undefined && depositParsed > 0n && (
                   <p className="mt-2 text-sm text-slate-500">
-                    You will receive <span className="font-medium text-slate-700">{formatShares(previewDeposit)}</span>{" "}
+                    You will receive{" "}
+                    <span className="font-medium text-slate-700">
+                      {formatShares(previewDeposit)}
+                    </span>{" "}
                     honeyUSDC
+                  </p>
+                )}
+                {usdcAllowance !== undefined && (
+                  <p className="mt-1 text-xs text-slate-400">
+                    Current approval: {formatUSDC(usdcAllowance)} USDC
                   </p>
                 )}
               </div>
               {needsApproval ? (
                 <button
                   onClick={handleApprove}
-                  disabled={busy}
+                  disabled={approveBusy}
                   className="w-full py-3 rounded-lg bg-slate-800 text-white font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
                 >
-                  {isApproving || isApprovingTx ? "Approving..." : "Approve USDC"}
+                  {approveBusy ? "Approving..." : `Approve ${depositAmount || "0"} USDC`}
                 </button>
               ) : (
                 <button
                   onClick={handleDeposit}
-                  disabled={busy || depositParsed === 0n}
+                  disabled={vaultBusy || depositParsed === 0n}
                   className="w-full py-3 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
                 >
-                  {isPending || isConfirming ? "Depositing..." : "Deposit"}
+                  {vaultBusy ? "Depositing..." : "Deposit"}
                 </button>
               )}
             </div>
@@ -218,17 +267,20 @@ export default function EarnPage() {
                 />
                 {previewRedeem !== undefined && withdrawParsed > 0n && (
                   <p className="mt-2 text-sm text-slate-500">
-                    You will receive <span className="font-medium text-slate-700">{formatUSDC(previewRedeem)}</span>{" "}
+                    You will receive{" "}
+                    <span className="font-medium text-slate-700">
+                      {formatUSDC(previewRedeem)}
+                    </span>{" "}
                     USDC
                   </p>
                 )}
               </div>
               <button
                 onClick={handleWithdraw}
-                disabled={busy || withdrawParsed === 0n}
+                disabled={vaultBusy || withdrawParsed === 0n}
                 className="w-full py-3 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
               >
-                {isPending || isConfirming ? "Withdrawing..." : "Withdraw"}
+                {vaultBusy ? "Withdrawing..." : "Withdraw"}
               </button>
             </div>
           )}
@@ -241,10 +293,10 @@ export default function EarnPage() {
           </p>
           <button
             onClick={handleFaucet}
-            disabled={busy}
+            disabled={faucetBusy}
             className="w-full py-3 rounded-lg bg-emerald-500 text-white font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
           >
-            {isPending || isConfirming ? "Minting..." : "Get 100K USDC"}
+            {faucetBusy ? "Minting..." : "Get 100K USDC"}
           </button>
         </div>
       </div>
