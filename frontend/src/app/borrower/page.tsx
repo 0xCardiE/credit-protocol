@@ -9,6 +9,7 @@ import {
 } from "wagmi";
 import { readContract } from "wagmi/actions";
 import { config } from "@/lib/wagmi";
+import { zeroAddress } from "viem";
 import {
   ADDRESSES,
   LOAN_MANAGER_ABI,
@@ -41,10 +42,35 @@ export default function BorrowerPage() {
   const { address } = useAccount();
   const [loans, setLoans] = useState<{ id: number; data: LoanData }[]>([]);
 
-  const { writeContract, data: txHash, isPending } = useWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash });
+  const [loanPrincipal, setLoanPrincipal] = useState("");
+  const [loanApr, setLoanApr] = useState("1000");
+  const [loanDuration, setLoanDuration] = useState("180");
 
-  const { data: loanCount } = useReadContract({
+  const {
+    writeContract: writeCreate,
+    data: createTxHash,
+    isPending: isCreatePending,
+  } = useWriteContract();
+  const { isLoading: isCreateConfirming, isSuccess: createSuccess } =
+    useWaitForTransactionReceipt({ hash: createTxHash });
+
+  const {
+    writeContract: writeRepay,
+    data: repayTxHash,
+    isPending: isRepayPending,
+  } = useWriteContract();
+  const { isLoading: isRepayConfirming } =
+    useWaitForTransactionReceipt({ hash: repayTxHash });
+
+  const {
+    writeContract: writeApprove,
+    data: approveTxHash,
+    isPending: isApprovePending,
+  } = useWriteContract();
+  const { isLoading: isApproveConfirming, isSuccess: approveSuccess } =
+    useWaitForTransactionReceipt({ hash: approveTxHash });
+
+  const { data: loanCount, refetch: refetchLoanCount } = useReadContract({
     address: ADDRESSES.loanManager,
     abi: LOAN_MANAGER_ABI,
     functionName: "getLoanCount",
@@ -57,6 +83,12 @@ export default function BorrowerPage() {
     args: address ? [address] : undefined,
     query: { enabled: !!address },
   });
+
+  useEffect(() => {
+    if (createSuccess) {
+      refetchLoanCount();
+    }
+  }, [createSuccess, refetchLoanCount]);
 
   useEffect(() => {
     async function fetchLoans() {
@@ -81,33 +113,52 @@ export default function BorrowerPage() {
       setLoans(results);
     }
     fetchLoans();
-  }, [loanCount, address, txHash]);
+  }, [loanCount, address, repayTxHash]);
 
-  function handleRepay(loanId: number, principal: bigint) {
+  function handleRequestLoan() {
     if (!address) return;
-    writeContract({
+    writeCreate({
+      address: ADDRESSES.loanManager,
+      abi: LOAN_MANAGER_ABI,
+      functionName: "createLoan",
+      args: [
+        parseUSDC(loanPrincipal),
+        BigInt(loanApr),
+        BigInt(Number(loanDuration) * 86400),
+        zeroAddress,
+        0n,
+        address,
+      ],
+    });
+  }
+
+  function handleApproveRepay(loanId: number, principal: bigint) {
+    writeApprove({
       address: ADDRESSES.mockUSDC,
       abi: MOCK_USDC_ABI,
       functionName: "approve",
       args: [ADDRESSES.loanManager, principal * 2n],
     });
-    setTimeout(() => {
-      writeContract({
-        address: ADDRESSES.loanManager,
-        abi: LOAN_MANAGER_ABI,
-        functionName: "repay",
-        args: [BigInt(loanId)],
-      });
-    }, 2000);
   }
 
-  const busy = isPending || isConfirming;
+  function handleRepay(loanId: number) {
+    writeRepay({
+      address: ADDRESSES.loanManager,
+      abi: LOAN_MANAGER_ABI,
+      functionName: "repay",
+      args: [BigInt(loanId)],
+    });
+  }
+
+  const createBusy = isCreatePending || isCreateConfirming;
+  const approveBusy = isApprovePending || isApproveConfirming;
+  const repayBusy = isRepayPending || isRepayConfirming;
 
   return (
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Borrower</h1>
-        <p className="mt-1 text-sm text-slate-500">View your loans and manage repayments</p>
+        <p className="mt-1 text-sm text-slate-500">Request loans and manage repayments</p>
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-6">
@@ -125,10 +176,67 @@ export default function BorrowerPage() {
         </div>
         <p className="text-sm text-slate-500">
           {isAllowed
-            ? "You are an approved borrower. Loans assigned to your address will appear below."
+            ? "You are an approved borrower. Submit a loan request below — the protocol manager will review and fund it."
             : "Contact the protocol manager to get added to the borrower allowlist."}
         </p>
       </div>
+
+      {isAllowed && (
+        <div className="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-slate-900">Request Loan</h2>
+          <p className="text-sm text-slate-500">
+            Submit your loan terms. Once created, the manager will review and fund it.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Principal (USDC)
+              </label>
+              <input
+                type="number"
+                value={loanPrincipal}
+                onChange={(e) => setLoanPrincipal(e.target.value)}
+                placeholder="100000"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                APR (bps)
+              </label>
+              <input
+                type="number"
+                value={loanApr}
+                onChange={(e) => setLoanApr(e.target.value)}
+                placeholder="1000"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <p className="mt-1 text-xs text-slate-400">
+                {(Number(loanApr) / 100).toFixed(2)}%
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                Duration (days)
+              </label>
+              <input
+                type="number"
+                value={loanDuration}
+                onChange={(e) => setLoanDuration(e.target.value)}
+                placeholder="180"
+                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+          </div>
+          <button
+            onClick={handleRequestLoan}
+            disabled={createBusy || !loanPrincipal}
+            className="w-full py-3 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
+          >
+            {createBusy ? "Submitting..." : "Request Loan"}
+          </button>
+        </div>
+      )}
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-200">
@@ -157,7 +265,9 @@ export default function BorrowerPage() {
                     <p className="text-xs text-slate-400">APR</p>
                   </div>
                   <div>
-                    <p className="text-sm text-slate-700">{formatDuration(Number(data.duration))}</p>
+                    <p className="text-sm text-slate-700">
+                      {formatDuration(Number(data.duration))}
+                    </p>
                     <p className="text-xs text-slate-400">Duration</p>
                   </div>
                   <span
@@ -168,14 +278,23 @@ export default function BorrowerPage() {
                     {LOAN_STATUS_LABELS[data.status] ?? "Unknown"}
                   </span>
                 </div>
-                <div>
-                  {(data.status === 1 || data.status === 3) && (
+                <div className="flex gap-2">
+                  {(data.status === 1 || data.status === 3) && !approveSuccess && (
                     <button
-                      onClick={() => handleRepay(id, data.principal)}
-                      disabled={busy}
+                      onClick={() => handleApproveRepay(id, data.principal)}
+                      disabled={approveBusy}
+                      className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                    >
+                      {approveBusy ? "Approving..." : "Approve Repay"}
+                    </button>
+                  )}
+                  {(data.status === 1 || data.status === 3) && approveSuccess && (
+                    <button
+                      onClick={() => handleRepay(id)}
+                      disabled={repayBusy}
                       className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
                     >
-                      {busy ? "Processing..." : "Repay"}
+                      {repayBusy ? "Repaying..." : "Repay"}
                     </button>
                   )}
                 </div>

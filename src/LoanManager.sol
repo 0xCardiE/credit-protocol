@@ -54,7 +54,8 @@ contract LoanManager is ILoanManager {
         address collateralToken,
         uint256 collateralAmount,
         address borrower
-    ) external onlyManager onlyAllowedBorrower(borrower) returns (uint256 loanId) {
+    ) external onlyAllowedBorrower(borrower) returns (uint256 loanId) {
+        require(msg.sender == borrower || msg.sender == manager, "not borrower or manager");
         loanId = nextLoanId++;
         _loans[loanId] = Loan({
             borrower: borrower,

@@ -178,10 +178,16 @@ contract HoneyVaultTest is Test {
         loanManager.createLoan(100_000e6, 1000, 365 days, address(0), 0, rando);
     }
 
-    function test_only_manager_can_create_loan() public {
+    function test_only_borrower_or_manager_can_create_loan() public {
         vm.prank(lp1);
-        vm.expectRevert("only manager");
+        vm.expectRevert("not borrower or manager");
         loanManager.createLoan(100_000e6, 1000, 365 days, address(0), 0, borrower1);
+    }
+
+    function test_borrower_can_create_own_loan() public {
+        vm.prank(borrower1);
+        uint256 loanId = loanManager.createLoan(50_000e6, 800, 180 days, address(0), 0, borrower1);
+        assertEq(loanId, 0);
     }
 
     function test_exchange_rate_after_interest() public {

@@ -9,7 +9,7 @@ import {
 } from "wagmi";
 import { readContract } from "wagmi/actions";
 import { config } from "@/lib/wagmi";
-import { type Address, zeroAddress } from "viem";
+import { type Address } from "viem";
 import {
   ADDRESSES,
   LOAN_MANAGER_ABI,
@@ -44,10 +44,6 @@ export default function AdminPage() {
   const [loans, setLoans] = useState<{ id: number; data: LoanData }[]>([]);
 
   const [newBorrower, setNewBorrower] = useState("");
-  const [loanBorrower, setLoanBorrower] = useState("");
-  const [loanPrincipal, setLoanPrincipal] = useState("");
-  const [loanApr, setLoanApr] = useState("1000");
-  const [loanDuration, setLoanDuration] = useState("180");
   const [impairLoanId, setImpairLoanId] = useState("");
   const [impairLoss, setImpairLoss] = useState("");
   const [recoverLoanId, setRecoverLoanId] = useState("");
@@ -112,22 +108,6 @@ export default function AdminPage() {
       abi: LOAN_MANAGER_ABI,
       functionName: "setAllowedBorrower",
       args: [newBorrower as Address, true],
-    });
-  }
-
-  function handleCreateLoan() {
-    writeContract({
-      address: ADDRESSES.loanManager,
-      abi: LOAN_MANAGER_ABI,
-      functionName: "createLoan",
-      args: [
-        parseUSDC(loanPrincipal),
-        BigInt(loanApr),
-        BigInt(Number(loanDuration) * 86400),
-        zeroAddress,
-        0n,
-        loanBorrower as Address,
-      ],
     });
   }
 
@@ -222,60 +202,6 @@ export default function AdminPage() {
           </button>
         </div>
 
-        {/* Create Loan */}
-        <div className="rounded-xl border border-slate-200 bg-white p-6 space-y-4">
-          <h2 className="text-lg font-semibold text-slate-900">Create Loan</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="block text-sm font-medium text-slate-700 mb-1">Borrower</label>
-              <input
-                type="text"
-                value={loanBorrower}
-                onChange={(e) => setLoanBorrower(e.target.value)}
-                placeholder="0x..."
-                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Principal (USDC)</label>
-              <input
-                type="number"
-                value={loanPrincipal}
-                onChange={(e) => setLoanPrincipal(e.target.value)}
-                placeholder="100000"
-                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">APR (bps)</label>
-              <input
-                type="number"
-                value={loanApr}
-                onChange={(e) => setLoanApr(e.target.value)}
-                placeholder="1000"
-                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-              <p className="mt-1 text-xs text-slate-400">{(Number(loanApr) / 100).toFixed(2)}%</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Duration (days)</label>
-              <input
-                type="number"
-                value={loanDuration}
-                onChange={(e) => setLoanDuration(e.target.value)}
-                placeholder="180"
-                className="w-full rounded-lg border border-slate-300 px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-            </div>
-          </div>
-          <button
-            onClick={handleCreateLoan}
-            disabled={busy || !loanBorrower || !loanPrincipal}
-            className="w-full py-2 rounded-lg bg-amber-500 text-white text-sm font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
-          >
-            {busy ? "Processing..." : "Create Loan"}
-          </button>
-        </div>
       </div>
 
       {/* Impairment & Recovery */}
