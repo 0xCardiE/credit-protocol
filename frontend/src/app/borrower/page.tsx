@@ -250,53 +250,65 @@ export default function BorrowerPage() {
         ) : (
           <div className="divide-y divide-slate-100">
             {loans.map(({ id, data }) => (
-              <div key={id} className="px-6 py-4 flex items-center justify-between">
-                <div className="flex items-center gap-6">
-                  <div>
-                    <p className="text-sm font-medium text-slate-900">Loan #{id}</p>
-                    <p className="text-xs text-slate-400">{shortenAddress(data.borrower)}</p>
+              <div
+                key={id}
+                className={`px-6 py-5 ${data.status === 0 ? "bg-amber-50/40" : ""}`}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <h3 className="text-sm font-semibold text-slate-900">Loan #{id}</h3>
+                    <span
+                      className={`px-2.5 py-1 text-xs font-medium rounded-full ${
+                        LOAN_STATUS_COLORS[data.status] ?? ""
+                      }`}
+                    >
+                      {LOAN_STATUS_LABELS[data.status] ?? "Unknown"}
+                    </span>
                   </div>
-                  <div>
-                    <p className="text-sm text-slate-700">{formatUSDC(data.principal)}</p>
-                    <p className="text-xs text-slate-400">Principal</p>
+                  <div className="flex gap-2">
+                    {(data.status === 1 || data.status === 3) && !approveSuccess && (
+                      <button
+                        onClick={() => handleApproveRepay(id, data.principal)}
+                        disabled={approveBusy}
+                        className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                      >
+                        {approveBusy ? "Approving..." : "Approve Repay"}
+                      </button>
+                    )}
+                    {(data.status === 1 || data.status === 3) && approveSuccess && (
+                      <button
+                        onClick={() => handleRepay(id)}
+                        disabled={repayBusy}
+                        className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                      >
+                        {repayBusy ? "Repaying..." : "Repay"}
+                      </button>
+                    )}
                   </div>
-                  <div>
-                    <p className="text-sm text-slate-700">{formatPercent(data.apr)}</p>
-                    <p className="text-xs text-slate-400">APR</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-700">
-                      {formatDuration(Number(data.duration))}
-                    </p>
-                    <p className="text-xs text-slate-400">Duration</p>
-                  </div>
-                  <span
-                    className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      LOAN_STATUS_COLORS[data.status] ?? ""
-                    }`}
-                  >
-                    {LOAN_STATUS_LABELS[data.status] ?? "Unknown"}
-                  </span>
                 </div>
-                <div className="flex gap-2">
-                  {(data.status === 1 || data.status === 3) && !approveSuccess && (
-                    <button
-                      onClick={() => handleApproveRepay(id, data.principal)}
-                      disabled={approveBusy}
-                      className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
-                    >
-                      {approveBusy ? "Approving..." : "Approve Repay"}
-                    </button>
-                  )}
-                  {(data.status === 1 || data.status === 3) && approveSuccess && (
-                    <button
-                      onClick={() => handleRepay(id)}
-                      disabled={repayBusy}
-                      className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                    >
-                      {repayBusy ? "Repaying..." : "Repay"}
-                    </button>
-                  )}
+
+                {data.status === 0 && (
+                  <div className="mb-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-2">
+                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Awaiting manager approval — loan has not been funded yet.
+                  </div>
+                )}
+
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="bg-slate-50 rounded-lg px-3 py-2">
+                    <p className="text-xs text-slate-400 mb-0.5">Principal</p>
+                    <p className="text-sm font-medium text-slate-800">{formatUSDC(data.principal)}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg px-3 py-2">
+                    <p className="text-xs text-slate-400 mb-0.5">APR</p>
+                    <p className="text-sm font-medium text-slate-800">{formatPercent(data.apr)}</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg px-3 py-2">
+                    <p className="text-xs text-slate-400 mb-0.5">Duration</p>
+                    <p className="text-sm font-medium text-slate-800">{formatDuration(Number(data.duration))}</p>
+                  </div>
                 </div>
               </div>
             ))}

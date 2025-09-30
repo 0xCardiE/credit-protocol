@@ -106,7 +106,7 @@ export default function AdminPage() {
       setLoans(results);
     }
     fetchLoans();
-  }, [loanCount, txHash]);
+  }, [loanCount, txSuccess]);
 
   const busy = isPending || isConfirming;
 
