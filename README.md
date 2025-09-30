@@ -27,7 +27,21 @@ An ERC-4626 vault protocol for institutional credit with fixed-term loans, withd
 - **NAV Accounting**: `totalAssets = cash + loans - unrealizedLosses`
 - **Impairment Flow**: mark impaired → declare default → partial recovery
 - **Withdrawal Queue**: when liquidity is insufficient, withdrawals queue FIFO
-- **Turbo Mode**: configurable time acceleration for demo simulations (1x–8640x)
+- **Turbo Mode**: configurable time acceleration for demo simulations (1x–720x)
+
+## Screenshots
+
+### Dashboard
+![Dashboard](docs/screenshots/dashboard.png)
+
+### Earn (LP)
+![Earn](docs/screenshots/earn.png)
+
+### Borrower
+![Borrower](docs/screenshots/borrower.png)
+
+### Risk / Admin
+![Admin](docs/screenshots/admin.png)
 
 ## Smart Contracts
 
