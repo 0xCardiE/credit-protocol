@@ -18,6 +18,7 @@ interface ILoanManager {
         address collateralToken;
         uint256 collateralAmount;
         uint256 startTime;
+        uint256 virtualStartTime;
         uint256 interestAccrued;
         uint256 expectedLoss;
         LoanStatus status;

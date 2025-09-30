@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useReadContract } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { ADDRESSES, LOAN_MANAGER_ABI } from "@/lib/contracts";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
@@ -13,6 +15,14 @@ const NAV_ITEMS = [
 
 export function Navbar() {
   const pathname = usePathname();
+
+  const { data: timeScale } = useReadContract({
+    address: ADDRESSES.loanManager,
+    abi: LOAN_MANAGER_ABI,
+    functionName: "timeScale",
+  });
+
+  const isTurbo = timeScale !== undefined && timeScale > 1n;
 
   return (
     <nav className="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-50">
@@ -25,6 +35,11 @@ export function Navbar() {
               </div>
               <span className="font-semibold text-lg text-slate-900">Honey Protocol</span>
             </Link>
+            {isTurbo && (
+              <span className="px-2 py-1 text-xs font-bold rounded-full bg-red-500 text-white animate-pulse">
+                TURBO {timeScale.toString()}x
+              </span>
+            )}
             <div className="hidden md:flex items-center gap-1">
               {NAV_ITEMS.map((item) => {
                 const isActive = pathname === item.href;

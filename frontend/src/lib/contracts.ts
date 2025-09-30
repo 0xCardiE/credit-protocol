@@ -35,7 +35,7 @@ export const HONEY_VAULT_ABI = [
 ] as const;
 
 export const LOAN_MANAGER_ABI = [
-  { type: "function", name: "getLoan", inputs: [{ name: "loanId", type: "uint256" }], outputs: [{ name: "", type: "tuple", components: [{ name: "borrower", type: "address" }, { name: "principal", type: "uint256" }, { name: "apr", type: "uint256" }, { name: "duration", type: "uint256" }, { name: "collateralToken", type: "address" }, { name: "collateralAmount", type: "uint256" }, { name: "startTime", type: "uint256" }, { name: "interestAccrued", type: "uint256" }, { name: "expectedLoss", type: "uint256" }, { name: "status", type: "uint8" }] }], stateMutability: "view" },
+  { type: "function", name: "getLoan", inputs: [{ name: "loanId", type: "uint256" }], outputs: [{ name: "", type: "tuple", components: [{ name: "borrower", type: "address" }, { name: "principal", type: "uint256" }, { name: "apr", type: "uint256" }, { name: "duration", type: "uint256" }, { name: "collateralToken", type: "address" }, { name: "collateralAmount", type: "uint256" }, { name: "startTime", type: "uint256" }, { name: "virtualStartTime", type: "uint256" }, { name: "interestAccrued", type: "uint256" }, { name: "expectedLoss", type: "uint256" }, { name: "status", type: "uint8" }] }], stateMutability: "view" },
   { type: "function", name: "getLoanCount", inputs: [], outputs: [{ name: "", type: "uint256" }], stateMutability: "view" },
   { type: "function", name: "accrue", inputs: [{ name: "loanId", type: "uint256" }], outputs: [{ name: "interest", type: "uint256" }], stateMutability: "view" },
   { type: "function", name: "createLoan", inputs: [{ name: "principal", type: "uint256" }, { name: "apr", type: "uint256" }, { name: "duration", type: "uint256" }, { name: "collateralToken", type: "address" }, { name: "collateralAmount", type: "uint256" }, { name: "borrower", type: "address" }], outputs: [{ name: "loanId", type: "uint256" }], stateMutability: "nonpayable" },
@@ -47,6 +47,8 @@ export const LOAN_MANAGER_ABI = [
   { type: "function", name: "setAllowedBorrower", inputs: [{ name: "borrower", type: "address" }, { name: "allowed", type: "bool" }], outputs: [], stateMutability: "nonpayable" },
   { type: "function", name: "allowedBorrowers", inputs: [{ name: "", type: "address" }], outputs: [{ name: "", type: "bool" }], stateMutability: "view" },
   { type: "function", name: "manager", inputs: [], outputs: [{ name: "", type: "address" }], stateMutability: "view" },
+  { type: "function", name: "timeScale", inputs: [], outputs: [{ name: "", type: "uint256" }], stateMutability: "view" },
+  { type: "function", name: "setTimeScale", inputs: [{ name: "scale", type: "uint256" }], outputs: [], stateMutability: "nonpayable" },
 ] as const;
 
 export const WITHDRAWAL_QUEUE_ABI = [

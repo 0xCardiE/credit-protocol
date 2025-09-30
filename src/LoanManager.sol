@@ -15,9 +15,13 @@ contract LoanManager is ILoanManager {
     address public manager;
 
     uint256 public nextLoanId;
+    uint256 public timeScale = 1;
+    uint256 public scaleChangeTimestamp;
+    uint256 public virtualTimeAtScaleChange;
     mapping(uint256 => Loan) internal _loans;
     mapping(address => bool) public allowedBorrowers;
 
+    event TimeScaleSet(uint256 newScale);
     event BorrowerAllowed(address indexed borrower, bool allowed);
     event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 principal);
     event LoanFunded(uint256 indexed loanId);
@@ -40,6 +44,19 @@ contract LoanManager is ILoanManager {
         vault = HoneyVault(vault_);
         asset = IERC20(asset_);
         manager = msg.sender;
+        scaleChangeTimestamp = block.timestamp;
+    }
+
+    function setTimeScale(uint256 scale) external onlyManager {
+        require(scale >= 1 && scale <= 720, "scale 1-720");
+        virtualTimeAtScaleChange = _virtualTimeNow();
+        scaleChangeTimestamp = block.timestamp;
+        timeScale = scale;
+        emit TimeScaleSet(scale);
+    }
+
+    function _virtualTimeNow() internal view returns (uint256) {
+        return virtualTimeAtScaleChange + (block.timestamp - scaleChangeTimestamp) * timeScale;
     }
 
     function setAllowedBorrower(address borrower, bool allowed) external onlyManager {
@@ -65,6 +82,7 @@ contract LoanManager is ILoanManager {
             collateralToken: collateralToken,
             collateralAmount: collateralAmount,
             startTime: 0,
+            virtualStartTime: 0,
             interestAccrued: 0,
             expectedLoss: 0,
             status: LoanStatus.Created
@@ -82,6 +100,7 @@ contract LoanManager is ILoanManager {
 
         loan.status = LoanStatus.Active;
         loan.startTime = block.timestamp;
+        loan.virtualStartTime = _virtualTimeNow();
 
         vault.fundLoan(loanId, loan.borrower, loan.principal);
         emit LoanFunded(loanId);
@@ -91,7 +110,7 @@ contract LoanManager is ILoanManager {
         Loan storage loan = _loans[loanId];
         if (loan.status != LoanStatus.Active && loan.status != LoanStatus.Impaired) return 0;
 
-        uint256 elapsed = block.timestamp - loan.startTime;
+        uint256 elapsed = _virtualTimeNow() - loan.virtualStartTime;
         if (elapsed > loan.duration) elapsed = loan.duration;
 
         interest = (loan.principal * loan.apr * elapsed) / (365 days * 10_000);

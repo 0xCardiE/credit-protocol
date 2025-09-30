@@ -70,13 +70,21 @@ export default function AdminPage() {
     functionName: "pendingCount",
   });
 
+  const { data: timeScale, refetch: refetchTimeScale } = useReadContract({
+    address: ADDRESSES.loanManager,
+    abi: LOAN_MANAGER_ABI,
+    functionName: "timeScale",
+  });
+
   const isManager = address && managerAddr && address.toLowerCase() === (managerAddr as string).toLowerCase();
+  const isTurbo = timeScale !== undefined && timeScale > 1n;
 
   useEffect(() => {
     if (txSuccess) {
       refetchLoanCount();
+      refetchTimeScale();
     }
-  }, [txSuccess, refetchLoanCount]);
+  }, [txSuccess, refetchLoanCount, refetchTimeScale]);
 
   useEffect(() => {
     async function fetchLoans() {
@@ -162,6 +170,15 @@ export default function AdminPage() {
       abi: WITHDRAWAL_QUEUE_ABI,
       functionName: "processQueue",
       args: [10n],
+    });
+  }
+
+  function handleSetTurbo(scale: bigint) {
+    writeContract({
+      address: ADDRESSES.loanManager,
+      abi: LOAN_MANAGER_ABI,
+      functionName: "setTimeScale",
+      args: [scale],
     });
   }
 
@@ -275,6 +292,34 @@ export default function AdminPage() {
             className="w-full py-2 rounded-lg bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 transition-colors"
           >
             Process Queue (up to 10)
+          </button>
+        </div>
+      </div>
+
+      {/* Turbo Mode */}
+      <div className={`rounded-xl border p-6 space-y-4 ${isTurbo ? "border-red-300 bg-red-50/50" : "border-slate-200 bg-white"}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">
+              Time Simulation {isTurbo && <span className="text-red-500 text-sm font-bold ml-2">TURBO ACTIVE</span>}
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Speed up time for demo purposes. At 24x, 1 real hour = 1 protocol day. At 720x, 1 real hour = 30 protocol days. Safe to switch mid-loan — interest is checkpointed.
+            </p>
+            {timeScale !== undefined && (
+              <p className="text-xs text-slate-400 mt-1">Current: {timeScale.toString()}x (1 real hour = {(Number(timeScale) / 24 * 1).toFixed(1)} protocol days)</p>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => handleSetTurbo(1n)} disabled={busy} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${timeScale === 1n ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+            1x Normal
+          </button>
+          <button onClick={() => handleSetTurbo(24n)} disabled={busy} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${timeScale === 24n ? "bg-red-500 text-white" : "bg-red-100 text-red-700 hover:bg-red-200"}`}>
+            24x (1h = 1d)
+          </button>
+          <button onClick={() => handleSetTurbo(720n)} disabled={busy} className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${timeScale === 720n ? "bg-red-500 text-white" : "bg-red-100 text-red-700 hover:bg-red-200"}`}>
+            720x (1h = 30d)
           </button>
         </div>
       </div>

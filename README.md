@@ -27,6 +27,7 @@ An ERC-4626 vault protocol for institutional credit with fixed-term loans, withd
 - **NAV Accounting**: `totalAssets = cash + loans - unrealizedLosses`
 - **Impairment Flow**: mark impaired → declare default → partial recovery
 - **Withdrawal Queue**: when liquidity is insufficient, withdrawals queue FIFO
+- **Turbo Mode**: configurable time acceleration for demo simulations (1x–8640x)
 
 ## Smart Contracts
 
@@ -36,6 +37,27 @@ An ERC-4626 vault protocol for institutional credit with fixed-term loans, withd
 | `HoneyVault` | ERC-4626 vault, tracks loans and losses |
 | `LoanManager` | Loan lifecycle: create → fund → accrue → repay/default |
 | `WithdrawalQueue` | FIFO queue for pending withdrawals |
+
+## Turbo Mode (Time Simulation)
+
+Loan durations are typically 90–180 days, which is impractical for live demos.
+The `LoanManager` has a **timeScale** multiplier that accelerates protocol time:
+
+| Scale | Effect | 180-day loan completes in |
+|-------|--------|---------------------------|
+| 1x | Normal (default) | 180 real days |
+| 24x | 1 real hour = 1 protocol day | 7.5 real hours |
+| 720x | 1 real hour = 30 protocol days | 6 real hours |
+
+**How it works:** A virtual clock tracks protocol time. Each time the manager calls
+`setTimeScale(uint256)`, the contract checkpoints how much virtual time has elapsed
+so far and applies the new scale only to time going forward. This means you can safely
+switch scales mid-loan (e.g. 1x → 720x → 1x) without retroactively inflating or
+deflating interest.
+
+When active, the navbar shows a red pulsing **TURBO** badge with the current multiplier.
+
+> **Note:** This is a demo/testnet feature. In production, `timeScale` would be removed or locked to 1.
 
 ## Development
 

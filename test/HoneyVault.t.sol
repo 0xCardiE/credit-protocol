@@ -218,4 +218,82 @@ contract HoneyVaultTest is Test {
 
         assertLt(shares, 100_000e6);
     }
+
+    function test_turbo_mode() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 100_000e6);
+        vault.deposit(100_000e6, lp1);
+        vm.stopPrank();
+
+        vm.startPrank(borrower1);
+        loanManager.createLoan(50_000e6, 1000, 180 days, address(0), 0, borrower1);
+        vm.stopPrank();
+
+        loanManager.fundLoan(0);
+
+        // At scale=1, warp 30 days to get baseline interest
+        vm.warp(block.timestamp + 30 days);
+        uint256 interestNormal = loanManager.accrue(0);
+
+        // Reset: rewind and use 720x scale with only 1 hour of real time
+        vm.warp(block.timestamp - 30 days);
+        loanManager.setTimeScale(720);
+        vm.warp(block.timestamp + 1 hours);
+        uint256 interestTurbo = loanManager.accrue(0);
+
+        // 720 hours = 30 days, so turbo interest should equal normal 30-day interest
+        assertEq(interestTurbo, interestNormal);
+    }
+
+    function test_turbo_mode_only_manager() public {
+        vm.prank(lp1);
+        vm.expectRevert("only manager");
+        loanManager.setTimeScale(24);
+    }
+
+    function test_turbo_mode_switching() public {
+        vm.startPrank(lp1);
+        usdc.approve(address(vault), 100_000e6);
+        vault.deposit(100_000e6, lp1);
+        vm.stopPrank();
+
+        vm.startPrank(borrower1);
+        loanManager.createLoan(50_000e6, 1000, 180 days, address(0), 0, borrower1);
+        vm.stopPrank();
+
+        loanManager.fundLoan(0);
+
+        // Phase 1: 1x for 1 hour => 1 hour virtual
+        vm.warp(block.timestamp + 1 hours);
+        uint256 interest1 = loanManager.accrue(0);
+
+        // Phase 2: switch to 720x, 1 more hour => 1 + 720 = 721 hours virtual
+        loanManager.setTimeScale(720);
+        vm.warp(block.timestamp + 1 hours);
+        uint256 interest2 = loanManager.accrue(0);
+
+        // Phase 3: switch back to 1x, 1 more hour => 721 + 1 = 722 hours virtual
+        loanManager.setTimeScale(1);
+        vm.warp(block.timestamp + 1 hours);
+        uint256 interest3 = loanManager.accrue(0);
+
+        // Interest should be monotonically increasing and proportional
+        assertGt(interest2, interest1);
+        assertGt(interest3, interest2);
+
+        // interest3 should be for 722 hours total, interest1 for 1 hour
+        // ratio should be ~722
+        assertApproxEqRel(interest3, interest1 * 722, 0.01e18);
+    }
+
+    function test_turbo_mode_bounds() public {
+        vm.expectRevert("scale 1-720");
+        loanManager.setTimeScale(0);
+
+        vm.expectRevert("scale 1-720");
+        loanManager.setTimeScale(721);
+
+        loanManager.setTimeScale(720);
+        assertEq(loanManager.timeScale(), 720);
+    }
 }
