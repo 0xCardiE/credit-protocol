@@ -1,11 +1,22 @@
 "use client";
 
+import { useState, useEffect, useCallback } from "react";
 import { useReadContract } from "wagmi";
+import { readContract } from "wagmi/actions";
+import { config } from "@/lib/wagmi";
 import { ADDRESSES, HONEY_VAULT_ABI, LOAN_MANAGER_ABI, WITHDRAWAL_QUEUE_ABI } from "@/lib/contracts";
 import { formatUSDC, formatShares, formatUtilization } from "@/lib/utils";
 import { StatCard } from "@/components/StatCard";
 
+interface LoanData {
+  status: number;
+  principal: bigint;
+}
+
 export default function Dashboard() {
+  const [totalInterest, setTotalInterest] = useState<bigint>(0n);
+  const [activeLoanCount, setActiveLoanCount] = useState(0);
+
   const { data: totalAssets } = useReadContract({
     address: ADDRESSES.honeyVault,
     abi: HONEY_VAULT_ABI,
@@ -54,6 +65,49 @@ export default function Dashboard() {
     functionName: "pendingCount",
   });
 
+  const { data: timeScale } = useReadContract({
+    address: ADDRESSES.loanManager,
+    abi: LOAN_MANAGER_ABI,
+    functionName: "timeScale",
+  });
+
+  const fetchInterest = useCallback(async () => {
+    if (!loanCount) return;
+    let interest = 0n;
+    let active = 0;
+    for (let i = 0; i < Number(loanCount); i++) {
+      try {
+        const loan = await readContract(config, {
+          address: ADDRESSES.loanManager,
+          abi: LOAN_MANAGER_ABI,
+          functionName: "getLoan",
+          args: [BigInt(i)],
+        });
+        const loanData = loan as LoanData;
+        if (loanData.status === 1 || loanData.status === 3) {
+          active++;
+          const accrued = await readContract(config, {
+            address: ADDRESSES.loanManager,
+            abi: LOAN_MANAGER_ABI,
+            functionName: "accrue",
+            args: [BigInt(i)],
+          }) as bigint;
+          interest += accrued;
+        }
+      } catch { break; }
+    }
+    setTotalInterest(interest);
+    setActiveLoanCount(active);
+  }, [loanCount]);
+
+  useEffect(() => { fetchInterest(); }, [fetchInterest]);
+
+  useEffect(() => {
+    if (activeLoanCount === 0) return;
+    const interval = setInterval(fetchInterest, 15_000);
+    return () => clearInterval(interval);
+  }, [activeLoanCount, fetchInterest]);
+
   const exchangeRate =
     totalAssets !== undefined && totalSupply !== undefined && totalSupply > 0n
       ? (Number(totalAssets) / Number(totalSupply)).toFixed(6)
@@ -78,11 +132,25 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Available Liquidity" value={formatUSDC(availableLiquidity)} />
         <StatCard label="Loans Outstanding" value={formatUSDC(totalLoansPrincipal)} />
+        <StatCard label="Accrued Interest" value={formatUSDC(totalInterest)} sub="across active loans" accent />
         <StatCard label="Unrealized Losses" value={formatUSDC(unrealizedLosses)} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Active Loans"
-          value={loanCount !== undefined ? loanCount.toString() : "—"}
-          sub={`${pendingWithdrawals ?? 0} pending withdrawals`}
+          value={activeLoanCount.toString()}
+          sub={`${loanCount ?? 0} total created`}
+        />
+        <StatCard
+          label="Pending Withdrawals"
+          value={pendingWithdrawals !== undefined ? pendingWithdrawals.toString() : "0"}
+          sub="in queue"
+        />
+        <StatCard
+          label="Time Scale"
+          value={timeScale !== undefined ? `${timeScale.toString()}x` : "1x"}
+          sub={timeScale !== undefined && timeScale > 1n ? "TURBO MODE" : "Normal"}
         />
       </div>
 

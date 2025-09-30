@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   useAccount,
   useReadContract,
@@ -39,9 +39,15 @@ interface LoanData {
   status: number;
 }
 
+interface LoanWithInterest {
+  id: number;
+  data: LoanData;
+  accruedInterest: bigint;
+}
+
 export default function AdminPage() {
   const { address } = useAccount();
-  const [loans, setLoans] = useState<{ id: number; data: LoanData }[]>([]);
+  const [loans, setLoans] = useState<LoanWithInterest[]>([]);
 
   const [newBorrower, setNewBorrower] = useState("");
   const [impairLoanId, setImpairLoanId] = useState("");
@@ -86,27 +92,47 @@ export default function AdminPage() {
     }
   }, [txSuccess, refetchLoanCount, refetchTimeScale]);
 
-  useEffect(() => {
-    async function fetchLoans() {
-      if (!loanCount) return;
-      const results: { id: number; data: LoanData }[] = [];
-      for (let i = 0; i < Number(loanCount); i++) {
-        try {
-          const loan = await readContract(config, {
-            address: ADDRESSES.loanManager,
-            abi: LOAN_MANAGER_ABI,
-            functionName: "getLoan",
-            args: [BigInt(i)],
-          });
-          results.push({ id: i, data: loan as LoanData });
-        } catch {
-          break;
+  const fetchLoans = useCallback(async () => {
+    if (!loanCount) return;
+    const results: LoanWithInterest[] = [];
+    for (let i = 0; i < Number(loanCount); i++) {
+      try {
+        const loan = await readContract(config, {
+          address: ADDRESSES.loanManager,
+          abi: LOAN_MANAGER_ABI,
+          functionName: "getLoan",
+          args: [BigInt(i)],
+        });
+        const loanData = loan as LoanData;
+        let accruedInterest = 0n;
+        if (loanData.status === 1 || loanData.status === 3) {
+          try {
+            accruedInterest = await readContract(config, {
+              address: ADDRESSES.loanManager,
+              abi: LOAN_MANAGER_ABI,
+              functionName: "accrue",
+              args: [BigInt(i)],
+            }) as bigint;
+          } catch {}
         }
+        results.push({ id: i, data: loanData, accruedInterest });
+      } catch {
+        break;
       }
-      setLoans(results);
     }
+    setLoans(results);
+  }, [loanCount]);
+
+  useEffect(() => {
     fetchLoans();
-  }, [loanCount, txSuccess]);
+  }, [fetchLoans, txSuccess]);
+
+  useEffect(() => {
+    const hasActiveLoans = loans.some((l) => l.data.status === 1 || l.data.status === 3);
+    if (!hasActiveLoans) return;
+    const interval = setInterval(fetchLoans, 10_000);
+    return () => clearInterval(interval);
+  }, [loans, fetchLoans]);
 
   const busy = isPending || isConfirming;
 
@@ -337,52 +363,64 @@ export default function AdminPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-100 text-left">
-                  <th className="px-6 py-3 font-medium text-slate-500">ID</th>
-                  <th className="px-6 py-3 font-medium text-slate-500">Borrower</th>
-                  <th className="px-6 py-3 font-medium text-slate-500">Principal</th>
-                  <th className="px-6 py-3 font-medium text-slate-500">APR</th>
-                  <th className="px-6 py-3 font-medium text-slate-500">Duration</th>
-                  <th className="px-6 py-3 font-medium text-slate-500">Status</th>
-                  <th className="px-6 py-3 font-medium text-slate-500">Actions</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">ID</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Borrower</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Principal</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Interest</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Total Owed</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">APR</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Duration</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Status</th>
+                  <th className="px-4 py-3 font-medium text-slate-500">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {loans.map(({ id, data }) => (
-                  <tr key={id} className="hover:bg-slate-50/50">
-                    <td className="px-6 py-3 font-mono text-slate-700">#{id}</td>
-                    <td className="px-6 py-3 font-mono text-slate-600">{shortenAddress(data.borrower)}</td>
-                    <td className="px-6 py-3 text-slate-700">{formatUSDC(data.principal)}</td>
-                    <td className="px-6 py-3 text-slate-700">{formatPercent(data.apr)}</td>
-                    <td className="px-6 py-3 text-slate-700">{formatDuration(Number(data.duration))}</td>
-                    <td className="px-6 py-3">
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${LOAN_STATUS_COLORS[data.status]}`}>
-                        {LOAN_STATUS_LABELS[data.status]}
-                      </span>
-                    </td>
-                    <td className="px-6 py-3">
-                      <div className="flex gap-2">
-                        {data.status === 0 && (
-                          <button
-                            onClick={() => handleFundLoan(id)}
-                            disabled={busy}
-                            className="px-3 py-1 rounded bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600 disabled:opacity-50"
-                          >
-                            Fund
-                          </button>
-                        )}
-                        {(data.status === 1 || data.status === 3) && (
-                          <button
-                            onClick={() => handleDeclareDefault(id)}
-                            disabled={busy}
-                            className="px-3 py-1 rounded bg-red-500 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-50"
-                          >
-                            Default
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {loans.map(({ id, data, accruedInterest }) => {
+                  const isActive = data.status === 1 || data.status === 3;
+                  const totalOwed = isActive ? data.principal + accruedInterest : 0n;
+                  return (
+                    <tr key={id} className="hover:bg-slate-50/50">
+                      <td className="px-4 py-3 font-mono text-slate-700">#{id}</td>
+                      <td className="px-4 py-3 font-mono text-slate-600">{shortenAddress(data.borrower)}</td>
+                      <td className="px-4 py-3 text-slate-700">{formatUSDC(data.principal)}</td>
+                      <td className="px-4 py-3 text-amber-700 font-medium">
+                        {isActive ? formatUSDC(accruedInterest) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-red-700 font-medium">
+                        {isActive ? formatUSDC(totalOwed) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{formatPercent(data.apr)}</td>
+                      <td className="px-4 py-3 text-slate-700">{formatDuration(Number(data.duration))}</td>
+                      <td className="px-4 py-3">
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${LOAN_STATUS_COLORS[data.status]}`}>
+                          {LOAN_STATUS_LABELS[data.status]}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-2">
+                          {data.status === 0 && (
+                            <button
+                              onClick={() => handleFundLoan(id)}
+                              disabled={busy}
+                              className="px-3 py-1 rounded bg-emerald-500 text-white text-xs font-medium hover:bg-emerald-600 disabled:opacity-50"
+                            >
+                              Fund
+                            </button>
+                          )}
+                          {isActive && (
+                            <button
+                              onClick={() => handleDeclareDefault(id)}
+                              disabled={busy}
+                              className="px-3 py-1 rounded bg-red-500 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-50"
+                            >
+                              Default
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   useAccount,
   useReadContract,
@@ -19,7 +19,6 @@ import {
   formatUSDC,
   formatPercent,
   formatDuration,
-  shortenAddress,
   parseUSDC,
   LOAN_STATUS_LABELS,
   LOAN_STATUS_COLORS,
@@ -38,9 +37,15 @@ interface LoanData {
   status: number;
 }
 
+interface LoanWithInterest {
+  id: number;
+  data: LoanData;
+  accruedInterest: bigint;
+}
+
 export default function BorrowerPage() {
   const { address } = useAccount();
-  const [loans, setLoans] = useState<{ id: number; data: LoanData }[]>([]);
+  const [loans, setLoans] = useState<LoanWithInterest[]>([]);
 
   const [loanPrincipal, setLoanPrincipal] = useState("");
   const [loanApr, setLoanApr] = useState("1000");
@@ -84,36 +89,63 @@ export default function BorrowerPage() {
     query: { enabled: !!address },
   });
 
+  const { data: timeScale } = useReadContract({
+    address: ADDRESSES.loanManager,
+    abi: LOAN_MANAGER_ABI,
+    functionName: "timeScale",
+  });
+
   useEffect(() => {
     if (createSuccess) {
       refetchLoanCount();
     }
   }, [createSuccess, refetchLoanCount]);
 
-  useEffect(() => {
-    async function fetchLoans() {
-      if (!loanCount || !address) return;
+  const fetchLoans = useCallback(async () => {
+    if (!loanCount || !address) return;
 
-      const results: { id: number; data: LoanData }[] = [];
-      for (let i = 0; i < Number(loanCount); i++) {
-        try {
-          const loan = await readContract(config, {
-            address: ADDRESSES.loanManager,
-            abi: LOAN_MANAGER_ABI,
-            functionName: "getLoan",
-            args: [BigInt(i)],
-          });
-          if ((loan as LoanData).borrower.toLowerCase() === address.toLowerCase()) {
-            results.push({ id: i, data: loan as LoanData });
-          }
-        } catch {
-          break;
+    const results: LoanWithInterest[] = [];
+    for (let i = 0; i < Number(loanCount); i++) {
+      try {
+        const loan = await readContract(config, {
+          address: ADDRESSES.loanManager,
+          abi: LOAN_MANAGER_ABI,
+          functionName: "getLoan",
+          args: [BigInt(i)],
+        });
+        const loanData = loan as LoanData;
+        if (loanData.borrower.toLowerCase() !== address.toLowerCase()) continue;
+
+        let accruedInterest = 0n;
+        if (loanData.status === 1 || loanData.status === 3) {
+          try {
+            accruedInterest = await readContract(config, {
+              address: ADDRESSES.loanManager,
+              abi: LOAN_MANAGER_ABI,
+              functionName: "accrue",
+              args: [BigInt(i)],
+            }) as bigint;
+          } catch {}
         }
+        results.push({ id: i, data: loanData, accruedInterest });
+      } catch {
+        break;
       }
-      setLoans(results);
     }
+    setLoans(results);
+  }, [loanCount, address]);
+
+  useEffect(() => {
     fetchLoans();
-  }, [loanCount, address, repayTxHash]);
+  }, [fetchLoans, repayTxHash]);
+
+  // Auto-refresh every 10s for live interest updates
+  useEffect(() => {
+    const hasActiveLoans = loans.some((l) => l.data.status === 1 || l.data.status === 3);
+    if (!hasActiveLoans) return;
+    const interval = setInterval(fetchLoans, 10_000);
+    return () => clearInterval(interval);
+  }, [loans, fetchLoans]);
 
   function handleRequestLoan() {
     if (!address) return;
@@ -153,6 +185,7 @@ export default function BorrowerPage() {
   const createBusy = isCreatePending || isCreateConfirming;
   const approveBusy = isApprovePending || isApproveConfirming;
   const repayBusy = isRepayPending || isRepayConfirming;
+  const isTurbo = timeScale !== undefined && timeScale > 1n;
 
   return (
     <div className="space-y-8">
@@ -239,8 +272,13 @@ export default function BorrowerPage() {
       )}
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-900">Your Loans</h2>
+          {isTurbo && (
+            <span className="text-xs text-red-500 font-medium">
+              Auto-refreshing every 10s
+            </span>
+          )}
         </div>
 
         {loans.length === 0 ? (
@@ -249,69 +287,117 @@ export default function BorrowerPage() {
           </div>
         ) : (
           <div className="divide-y divide-slate-100">
-            {loans.map(({ id, data }) => (
-              <div
-                key={id}
-                className={`px-6 py-5 ${data.status === 0 ? "bg-amber-50/40" : ""}`}
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-3">
-                    <h3 className="text-sm font-semibold text-slate-900">Loan #{id}</h3>
-                    <span
-                      className={`px-2.5 py-1 text-xs font-medium rounded-full ${
-                        LOAN_STATUS_COLORS[data.status] ?? ""
-                      }`}
-                    >
-                      {LOAN_STATUS_LABELS[data.status] ?? "Unknown"}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    {(data.status === 1 || data.status === 3) && !approveSuccess && (
-                      <button
-                        onClick={() => handleApproveRepay(id, data.principal)}
-                        disabled={approveBusy}
-                        className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
-                      >
-                        {approveBusy ? "Approving..." : "Approve Repay"}
-                      </button>
-                    )}
-                    {(data.status === 1 || data.status === 3) && approveSuccess && (
-                      <button
-                        onClick={() => handleRepay(id)}
-                        disabled={repayBusy}
-                        className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
-                      >
-                        {repayBusy ? "Repaying..." : "Repay"}
-                      </button>
-                    )}
-                  </div>
-                </div>
+            {loans.map(({ id, data, accruedInterest }) => {
+              const isActive = data.status === 1 || data.status === 3;
+              const totalOwed = isActive ? data.principal + accruedInterest : 0n;
+              const elapsed = isActive && data.startTime > 0n
+                ? Number(accruedInterest) > 0
+                  ? Math.min(
+                      Math.round((Number(accruedInterest) * 365 * 86400 * 10000) / (Number(data.principal) * Number(data.apr))),
+                      Number(data.duration)
+                    )
+                  : 0
+                : 0;
+              const progress = isActive ? Math.min((elapsed / Number(data.duration)) * 100, 100) : 0;
+              const isMatured = progress >= 100;
 
-                {data.status === 0 && (
-                  <div className="mb-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-2">
-                    <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    Awaiting manager approval — loan has not been funded yet.
+              return (
+                <div
+                  key={id}
+                  className={`px-6 py-5 ${data.status === 0 ? "bg-amber-50/40" : ""}`}
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-sm font-semibold text-slate-900">Loan #{id}</h3>
+                      <span
+                        className={`px-2.5 py-1 text-xs font-medium rounded-full ${
+                          LOAN_STATUS_COLORS[data.status] ?? ""
+                        }`}
+                      >
+                        {LOAN_STATUS_LABELS[data.status] ?? "Unknown"}
+                      </span>
+                      {isMatured && isActive && (
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-700">
+                          Matured
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      {isActive && !approveSuccess && (
+                        <button
+                          onClick={() => handleApproveRepay(id, data.principal)}
+                          disabled={approveBusy}
+                          className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                        >
+                          {approveBusy ? "Approving..." : "Approve Repay"}
+                        </button>
+                      )}
+                      {isActive && approveSuccess && (
+                        <button
+                          onClick={() => handleRepay(id)}
+                          disabled={repayBusy}
+                          className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                        >
+                          {repayBusy ? "Repaying..." : "Repay"}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                )}
 
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-slate-50 rounded-lg px-3 py-2">
-                    <p className="text-xs text-slate-400 mb-0.5">Principal</p>
-                    <p className="text-sm font-medium text-slate-800">{formatUSDC(data.principal)}</p>
+                  {data.status === 0 && (
+                    <div className="mb-3 flex items-center gap-2 text-xs text-amber-700 bg-amber-100 rounded-lg px-3 py-2">
+                      <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Awaiting manager approval — loan has not been funded yet.
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-3 gap-4 mb-3">
+                    <div className="bg-slate-50 rounded-lg px-3 py-2">
+                      <p className="text-xs text-slate-400 mb-0.5">Principal</p>
+                      <p className="text-sm font-medium text-slate-800">{formatUSDC(data.principal)}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg px-3 py-2">
+                      <p className="text-xs text-slate-400 mb-0.5">APR</p>
+                      <p className="text-sm font-medium text-slate-800">{formatPercent(data.apr)}</p>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg px-3 py-2">
+                      <p className="text-xs text-slate-400 mb-0.5">Duration</p>
+                      <p className="text-sm font-medium text-slate-800">{formatDuration(Number(data.duration))}</p>
+                    </div>
                   </div>
-                  <div className="bg-slate-50 rounded-lg px-3 py-2">
-                    <p className="text-xs text-slate-400 mb-0.5">APR</p>
-                    <p className="text-sm font-medium text-slate-800">{formatPercent(data.apr)}</p>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg px-3 py-2">
-                    <p className="text-xs text-slate-400 mb-0.5">Duration</p>
-                    <p className="text-sm font-medium text-slate-800">{formatDuration(Number(data.duration))}</p>
-                  </div>
+
+                  {isActive && (
+                    <>
+                      <div className="grid grid-cols-3 gap-4 mb-3">
+                        <div className="bg-amber-50 rounded-lg px-3 py-2 border border-amber-100">
+                          <p className="text-xs text-amber-600 mb-0.5">Accrued Interest</p>
+                          <p className="text-sm font-semibold text-amber-800">{formatUSDC(accruedInterest)}</p>
+                        </div>
+                        <div className="bg-red-50 rounded-lg px-3 py-2 border border-red-100">
+                          <p className="text-xs text-red-600 mb-0.5">Total Owed</p>
+                          <p className="text-sm font-semibold text-red-800">{formatUSDC(totalOwed)}</p>
+                        </div>
+                        <div className="bg-blue-50 rounded-lg px-3 py-2 border border-blue-100">
+                          <p className="text-xs text-blue-600 mb-0.5">Time Elapsed</p>
+                          <p className="text-sm font-semibold text-blue-800">
+                            {formatDuration(elapsed)} / {formatDuration(Number(data.duration))}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="w-full bg-slate-200 rounded-full h-2">
+                        <div
+                          className={`h-2 rounded-full transition-all ${isMatured ? "bg-blue-500" : "bg-amber-500"}`}
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 text-right">{progress.toFixed(1)}% complete</p>
+                    </>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
