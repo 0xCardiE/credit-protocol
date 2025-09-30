@@ -117,6 +117,8 @@ export default function EarnPage() {
     query: { enabled: !!address },
   });
 
+  const hasEnoughBalance =
+    usdcBalance !== undefined && depositParsed > 0n && usdcBalance >= depositParsed;
   const needsApproval =
     usdcAllowance !== undefined && depositParsed > 0n && usdcAllowance < depositParsed;
 
@@ -234,10 +236,13 @@ export default function EarnPage() {
                   </p>
                 )}
               </div>
+              {!hasEnoughBalance && depositParsed > 0n && (
+                <p className="text-sm text-red-500">Insufficient USDC balance. Use the faucet first.</p>
+              )}
               {needsApproval ? (
                 <button
                   onClick={handleApprove}
-                  disabled={approveBusy}
+                  disabled={approveBusy || !hasEnoughBalance}
                   className="w-full py-3 rounded-lg bg-slate-800 text-white font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
                 >
                   {approveBusy ? "Approving..." : `Approve ${depositAmount || "0"} USDC`}
@@ -245,7 +250,7 @@ export default function EarnPage() {
               ) : (
                 <button
                   onClick={handleDeposit}
-                  disabled={vaultBusy || depositParsed === 0n}
+                  disabled={vaultBusy || depositParsed === 0n || !hasEnoughBalance}
                   className="w-full py-3 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
                 >
                   {vaultBusy ? "Depositing..." : "Deposit"}
@@ -290,9 +295,12 @@ export default function EarnPage() {
                   </p>
                 )}
               </div>
+              {shareBalance !== undefined && withdrawParsed > 0n && withdrawParsed > shareBalance && (
+                <p className="text-sm text-red-500">Insufficient honeyUSDC balance.</p>
+              )}
               <button
                 onClick={handleWithdraw}
-                disabled={vaultBusy || withdrawParsed === 0n}
+                disabled={vaultBusy || withdrawParsed === 0n || (shareBalance !== undefined && withdrawParsed > shareBalance)}
                 className="w-full py-3 rounded-lg bg-amber-500 text-white font-medium hover:bg-amber-600 disabled:opacity-50 transition-colors"
               >
                 {vaultBusy ? "Withdrawing..." : "Withdraw"}
