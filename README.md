@@ -1,6 +1,6 @@
 # Credit Protocol — Institutional Credit Vault
 
-An ERC-4626 vault protocol for institutional credit with fixed-term loans, withdrawal queues, and impairment handling.
+An on-chain credit facility built on ERC-4626. LPs deposit USDC into a vault, the manager extends fixed-term loans to allowlisted borrowers, and a withdrawal queue handles liquidity mismatches — all with full impairment and recovery accounting.
 
 ## Architecture
 
@@ -43,6 +43,22 @@ An ERC-4626 vault protocol for institutional credit with fixed-term loans, withd
 ### Risk / Admin
 ![Admin](docs/screenshots/admin.png)
 
+## Loan Lifecycle
+
+```
+Created ──▶ Active ──▶ Repaid
+               │
+               ├──▶ Impaired ──▶ Defaulted ──▶ (partial recovery)
+               │                     ▲
+               └─────────────────────┘
+```
+
+1. **Created** — Borrower (or manager) submits loan terms; awaiting funding
+2. **Active** — Manager funds the loan; interest accrues linearly at fixed APR
+3. **Repaid** — Borrower repays principal + accrued interest; collateral returned
+4. **Impaired** — Manager marks expected loss; vault NAV adjusts immediately
+5. **Defaulted** — Full write-off; manager can later trigger partial recovery
+
 ## Smart Contracts
 
 | Contract | Description |
@@ -72,6 +88,18 @@ deflating interest.
 When active, the navbar shows a red pulsing **TURBO** badge with the current multiplier.
 
 > **Note:** This is a demo/testnet feature. In production, `timeScale` would be removed or locked to 1.
+
+## Frontend
+
+Next.js app with wagmi/viem for wallet interaction. Four pages: Dashboard, Earn (LP deposits/withdrawals), Borrower (request & repay loans), and Admin/Risk (fund loans, manage impairments, turbo mode).
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The app reads contract addresses from environment variables — see `frontend/.env.local` after deploying.
 
 ## Development
 
