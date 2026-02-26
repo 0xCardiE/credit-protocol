@@ -55,6 +55,7 @@ export default function BorrowerPage() {
     writeContract: writeCreate,
     data: createTxHash,
     isPending: isCreatePending,
+    error: createError,
   } = useWriteContract();
   const { isLoading: isCreateConfirming, isSuccess: createSuccess } =
     useWaitForTransactionReceipt({ hash: createTxHash });
@@ -63,17 +64,35 @@ export default function BorrowerPage() {
     writeContract: writeRepay,
     data: repayTxHash,
     isPending: isRepayPending,
+    error: repayError,
   } = useWriteContract();
-  const { isLoading: isRepayConfirming } =
+  const { isLoading: isRepayConfirming, isSuccess: repaySuccess } =
     useWaitForTransactionReceipt({ hash: repayTxHash });
 
   const {
     writeContract: writeApprove,
     data: approveTxHash,
     isPending: isApprovePending,
+    error: approveError,
   } = useWriteContract();
   const { isLoading: isApproveConfirming, isSuccess: approveSuccess } =
     useWaitForTransactionReceipt({ hash: approveTxHash });
+
+  const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
+    address: ADDRESSES.mockUSDC,
+    abi: MOCK_USDC_ABI,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: !!address },
+  });
+
+  const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
+    address: ADDRESSES.mockUSDC,
+    abi: MOCK_USDC_ABI,
+    functionName: "allowance",
+    args: address ? [address, ADDRESSES.loanManager] : undefined,
+    query: { enabled: !!address },
+  });
 
   const { data: loanCount, refetch: refetchLoanCount } = useReadContract({
     address: ADDRESSES.loanManager,
@@ -100,6 +119,12 @@ export default function BorrowerPage() {
       refetchLoanCount();
     }
   }, [createSuccess, refetchLoanCount]);
+
+  useEffect(() => {
+    if (approveSuccess) {
+      refetchAllowance();
+    }
+  }, [approveSuccess, refetchAllowance]);
 
   const fetchLoans = useCallback(async () => {
     if (!loanCount || !address) return;
@@ -139,6 +164,14 @@ export default function BorrowerPage() {
     fetchLoans();
   }, [fetchLoans, repayTxHash]);
 
+  useEffect(() => {
+    if (repaySuccess) {
+      refetchBalance();
+      refetchAllowance();
+      fetchLoans();
+    }
+  }, [repaySuccess, refetchBalance, refetchAllowance, fetchLoans]);
+
   // Auto-refresh every 10s for live interest updates
   useEffect(() => {
     const hasActiveLoans = loans.some((l) => l.data.status === 1 || l.data.status === 3);
@@ -164,12 +197,13 @@ export default function BorrowerPage() {
     });
   }
 
-  function handleApproveRepay(loanId: number, principal: bigint) {
+  function handleApproveRepay(loanId: number, totalOwed: bigint) {
+    const approveAmount = totalOwed + (totalOwed / 10n);
     writeApprove({
       address: ADDRESSES.mockUSDC,
       abi: MOCK_USDC_ABI,
       functionName: "approve",
-      args: [ADDRESSES.loanManager, principal * 2n],
+      args: [ADDRESSES.loanManager, approveAmount],
     });
   }
 
@@ -290,6 +324,10 @@ export default function BorrowerPage() {
             {loans.map(({ id, data, accruedInterest }) => {
               const isActive = data.status === 1 || data.status === 3;
               const totalOwed = isActive ? data.principal + accruedInterest : 0n;
+              const hasAllowance = usdcAllowance !== undefined && usdcAllowance >= totalOwed && totalOwed > 0n;
+              const hasBalance = usdcBalance !== undefined && usdcBalance >= totalOwed;
+              const needsMoreTokens = isActive && usdcBalance !== undefined && usdcBalance < totalOwed;
+              const needsMoreAllowance = isActive && !hasAllowance && totalOwed > 0n;
               const elapsed = isActive && data.startTime > 0n
                 ? Number(accruedInterest) > 0
                   ? Math.min(
@@ -322,20 +360,30 @@ export default function BorrowerPage() {
                         </span>
                       )}
                     </div>
-                    <div className="flex gap-2">
-                      {isActive && !approveSuccess && (
+                    <div className="flex items-center gap-2">
+                      {needsMoreTokens && (
+                        <span className="text-xs text-red-500">
+                          Insufficient balance — need {formatUSDC(totalOwed - usdcBalance!)} more USDC
+                        </span>
+                      )}
+                      {needsMoreAllowance && !needsMoreTokens && (
+                        <span className="text-xs text-amber-600">
+                          Approval needed
+                        </span>
+                      )}
+                      {isActive && needsMoreAllowance && (
                         <button
-                          onClick={() => handleApproveRepay(id, data.principal)}
-                          disabled={approveBusy}
+                          onClick={() => handleApproveRepay(id, totalOwed)}
+                          disabled={approveBusy || needsMoreTokens}
                           className="px-4 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 transition-colors"
                         >
-                          {approveBusy ? "Approving..." : "Approve Repay"}
+                          {approveBusy ? "Approving..." : `Approve ${formatUSDC(totalOwed)}`}
                         </button>
                       )}
-                      {isActive && approveSuccess && (
+                      {isActive && hasAllowance && (
                         <button
                           onClick={() => handleRepay(id)}
-                          disabled={repayBusy}
+                          disabled={repayBusy || needsMoreTokens}
                           className="px-4 py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 disabled:opacity-50 transition-colors"
                         >
                           {repayBusy ? "Repaying..." : "Repay"}
@@ -401,6 +449,15 @@ export default function BorrowerPage() {
           </div>
         )}
       </div>
+
+      {(createError || approveError || repayError) && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <h3 className="text-sm font-semibold text-red-800 mb-1">Transaction Failed</h3>
+          <p className="text-xs text-red-600 break-all">
+            {(createError || approveError || repayError)?.message?.split('\n')[0] ?? "Unknown error"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
