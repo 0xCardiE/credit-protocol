@@ -503,4 +503,319 @@ contract FuzzTest is Test {
         vm.expectRevert("borrower not allowed");
         loanManager.createLoan(100e6, 1000, 180 days, address(0), 0, rando);
     }
+
+    // ══════════════════════════════════════════════════════════════
+    //  9. SHARE PRICE MANIPULATION — ERC4626 ECONOMIC ATTACKS
+    // ══════════════════════════════════════════════════════════════
+
+    /// @dev First depositor should not be able to grief later depositors via donation attack.
+    ///      Classic ERC4626 inflation attack: deposit 1 wei, donate a large amount,
+    ///      then the second depositor gets 0 shares due to rounding.
+    function testFuzz_inflationAttackMitigation(uint256 donationAmt) public {
+        donationAmt = bound(donationAmt, 1e6, 10_000_000e6);
+        address attacker = makeAddr("attacker");
+        address victim = makeAddr("victim");
+
+        // Attacker deposits 1 USDC (smallest meaningful amount)
+        uint256 attackerShares = _depositAs(attacker, 1e6);
+        assertGt(attackerShares, 0);
+
+        // Attacker donates USDC directly to vault (inflating share price)
+        usdc.mint(attacker, donationAmt);
+        vm.prank(attacker);
+        usdc.transfer(address(vault), donationAmt);
+
+        // Victim deposits a reasonable amount — should still get shares
+        uint256 victimDeposit = donationAmt;
+        uint256 victimShares = _depositAs(victim, victimDeposit);
+
+        // Victim must receive nonzero shares; if 0, the attack worked
+        assertGt(victimShares, 0, "victim must receive shares (inflation attack succeeded)");
+    }
+
+    /// @dev Late depositors should get fewer shares per USDC when interest has accrued.
+    ///      This verifies the share price actually increases from earned interest.
+    function testFuzz_sharePriceIncreasesWithInterest(
+        uint256 depositAmt,
+        uint256 principal,
+        uint256 apr,
+        uint256 elapsed
+    ) public {
+        depositAmt = _boundDeposit(depositAmt);
+        principal = _boundPrincipal(principal, depositAmt);
+        apr = bound(apr, 100, 5000); // at least 1% so interest is nonzero
+        elapsed = bound(elapsed, 30 days, 365 days);
+
+        address earlyLP = makeAddr("earlyLP");
+        address lateLP = makeAddr("lateLP");
+
+        _depositAs(earlyLP, depositAmt);
+
+        uint256 loanId = _createAndFundLoan(principal, apr, 3650 days);
+        vm.warp(block.timestamp + elapsed);
+
+        uint256 interest = loanManager.accrue(loanId);
+        uint256 totalOwed = principal + interest;
+        usdc.mint(borrower1, totalOwed);
+        vm.startPrank(borrower1);
+        usdc.approve(address(loanManager), totalOwed);
+        loanManager.repay(loanId);
+        vm.stopPrank();
+
+        // Vault now has depositAmt + interest in cash
+        // Late LP deposits the same amount but should get fewer shares
+        uint256 lateShares = _depositAs(lateLP, depositAmt);
+        uint256 earlyShares = vault.balanceOf(earlyLP);
+
+        if (interest > 0) {
+            assertLt(lateShares, earlyShares, "late depositor must get fewer shares");
+        }
+    }
+
+    /// @dev No depositor can withdraw more USDC than the vault actually holds + loans value.
+    ///      The total redeemable value of all shares must never exceed totalAssets.
+    function testFuzz_totalSharesNeverExceedAssets(uint256 dep1, uint256 dep2) public {
+        dep1 = _boundDeposit(dep1);
+        dep2 = _boundDeposit(dep2);
+
+        address lp1 = makeAddr("solvencyLP1");
+        address lp2 = makeAddr("solvencyLP2");
+
+        uint256 shares1 = _depositAs(lp1, dep1);
+        uint256 shares2 = _depositAs(lp2, dep2);
+
+        uint256 totalRedeemable = vault.previewRedeem(shares1) + vault.previewRedeem(shares2);
+        assertLe(totalRedeemable, vault.totalAssets(), "redeemable must never exceed totalAssets");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  10. LOAN STATE MACHINE — ILLEGAL TRANSITIONS
+    // ══════════════════════════════════════════════════════════════
+
+    /// @dev A repaid loan cannot be repaid again, impaired, or defaulted.
+    function testFuzz_repaidLoanIsTerminal(uint256 depositAmt, uint256 principal) public {
+        depositAmt = _boundDeposit(depositAmt);
+        principal = _boundPrincipal(principal, depositAmt);
+
+        _depositAs(makeAddr("lpTerminal"), depositAmt);
+        uint256 loanId = _createAndFundLoan(principal, 1000, 180 days);
+
+        usdc.mint(borrower1, principal);
+        vm.startPrank(borrower1);
+        usdc.approve(address(loanManager), principal);
+        loanManager.repay(loanId);
+        vm.stopPrank();
+
+        vm.expectRevert("loan not repayable");
+        vm.prank(borrower1);
+        loanManager.repay(loanId);
+
+        vm.expectRevert("loan not active");
+        loanManager.markImpaired(loanId, 1e6);
+
+        vm.expectRevert("cannot default");
+        loanManager.declareDefault(loanId);
+    }
+
+    /// @dev A defaulted loan cannot be repaid, impaired, re-defaulted, or re-funded.
+    function testFuzz_defaultedLoanIsTerminal(uint256 depositAmt, uint256 principal) public {
+        depositAmt = _boundDeposit(depositAmt);
+        principal = _boundPrincipal(principal, depositAmt);
+
+        _depositAs(makeAddr("lpDefTerm"), depositAmt);
+        uint256 loanId = _createAndFundLoan(principal, 1000, 180 days);
+
+        loanManager.declareDefault(loanId);
+
+        vm.expectRevert("loan not repayable");
+        vm.prank(borrower1);
+        loanManager.repay(loanId);
+
+        vm.expectRevert("loan not active");
+        loanManager.markImpaired(loanId, 1e6);
+
+        vm.expectRevert("cannot default");
+        loanManager.declareDefault(loanId);
+
+        vm.expectRevert("loan not in Created state");
+        loanManager.fundLoan(loanId);
+    }
+
+    /// @dev A created (unfunded) loan cannot be repaid, impaired, or defaulted.
+    function testFuzz_createdLoanCanOnlyBeFunded(uint256 principal) public {
+        principal = bound(principal, 1e6, 10_000_000e6);
+
+        uint256 loanId = loanManager.createLoan(principal, 1000, 180 days, address(0), 0, borrower1);
+
+        vm.expectRevert("loan not repayable");
+        vm.prank(borrower1);
+        loanManager.repay(loanId);
+
+        vm.expectRevert("loan not active");
+        loanManager.markImpaired(loanId, 1e6);
+
+        vm.expectRevert("cannot default");
+        loanManager.declareDefault(loanId);
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  11. MULTI-LOAN ACCOUNTING — NO CROSS-CONTAMINATION
+    // ══════════════════════════════════════════════════════════════
+
+    /// @dev Multiple concurrent loans: defaulting one should not affect the other's repayment.
+    function testFuzz_multiLoanIsolation(
+        uint256 depositAmt,
+        uint256 p1,
+        uint256 p2
+    ) public {
+        depositAmt = bound(depositAmt, 10_000e6, MAX_USDC);
+        p1 = bound(p1, 1e6, depositAmt / 3);
+        p2 = bound(p2, 1e6, depositAmt / 3);
+
+        address borrower2 = makeAddr("borrower2");
+        loanManager.setAllowedBorrower(borrower2, true);
+
+        _depositAs(makeAddr("lpMulti"), depositAmt);
+
+        uint256 loan1 = _createAndFundLoan(p1, 1000, 180 days);
+        uint256 loan2 = loanManager.createLoan(p2, 800, 365 days, address(0), 0, borrower2);
+        loanManager.fundLoan(loan2);
+
+        assertEq(vault.totalLoansPrincipal(), p1 + p2);
+
+        // Default loan 1
+        loanManager.declareDefault(loan1);
+        assertEq(vault.unrealizedLosses(), p1);
+
+        // Loan 2 should still be active and repayable
+        vm.warp(block.timestamp + 90 days);
+        uint256 interest2 = loanManager.accrue(loan2);
+        uint256 owed2 = p2 + interest2;
+
+        usdc.mint(borrower2, owed2);
+        vm.startPrank(borrower2);
+        usdc.approve(address(loanManager), owed2);
+        loanManager.repay(loan2);
+        vm.stopPrank();
+
+        // loan1's principal stays in totalLoansPrincipal (default doesn't remove it)
+        assertEq(vault.totalLoansPrincipal(), p1, "defaulted loan principal remains tracked");
+        assertEq(vault.unrealizedLosses(), p1, "loan1 loss still tracked");
+    }
+
+    /// @dev Total vault accounting identity: totalAssets = cash + totalLoansPrincipal - unrealizedLosses.
+    function testFuzz_accountingIdentity(
+        uint256 depositAmt,
+        uint256 principal,
+        uint256 lossFraction
+    ) public {
+        depositAmt = _boundDeposit(depositAmt);
+        principal = _boundPrincipal(principal, depositAmt);
+        lossFraction = bound(lossFraction, 0, 10000);
+
+        _depositAs(makeAddr("lpIdentity"), depositAmt);
+        uint256 loanId = _createAndFundLoan(principal, 1000, 180 days);
+
+        if (lossFraction > 0) {
+            uint256 loss = (principal * lossFraction) / 10000;
+            if (loss == 0) loss = 1;
+            loanManager.markImpaired(loanId, loss);
+        }
+
+        uint256 cash = usdc.balanceOf(address(vault));
+        uint256 loansValue = vault.totalLoansPrincipal() > vault.unrealizedLosses()
+            ? vault.totalLoansPrincipal() - vault.unrealizedLosses()
+            : 0;
+
+        assertEq(vault.totalAssets(), cash + loansValue, "accounting identity violated");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  12. WITHDRAWAL QUEUE — FIFO CORRECTNESS
+    // ══════════════════════════════════════════════════════════════
+
+    /// @dev Withdrawal queue should process in FIFO order and return correct assets.
+    function testFuzz_withdrawalQueueFIFO(uint256 depositAmt, uint256 loanPrincipal) public {
+        depositAmt = bound(depositAmt, 100_000e6, MAX_USDC);
+        loanPrincipal = bound(loanPrincipal, depositAmt / 2, (depositAmt * 9) / 10);
+
+        address lp1 = makeAddr("queueLP1");
+        address lp2 = makeAddr("queueLP2");
+
+        // Both LPs deposit equally
+        uint256 half = depositAmt / 2;
+        uint256 shares1 = _depositAs(lp1, half);
+        uint256 shares2 = _depositAs(lp2, half);
+
+        // Lock most liquidity in a loan
+        _createAndFundLoan(loanPrincipal, 1000, 365 days);
+
+        // Both LPs queue withdrawal
+        uint256 requestShares1 = shares1 / 2;
+        uint256 requestShares2 = shares2 / 2;
+
+        vm.startPrank(lp1);
+        IERC20(address(vault)).approve(address(withdrawalQueue), requestShares1);
+        uint256 reqId1 = withdrawalQueue.requestWithdrawal(requestShares1);
+        vm.stopPrank();
+
+        vm.startPrank(lp2);
+        IERC20(address(vault)).approve(address(withdrawalQueue), requestShares2);
+        uint256 reqId2 = withdrawalQueue.requestWithdrawal(requestShares2);
+        vm.stopPrank();
+
+        assertEq(reqId1, 0, "first request should be id 0");
+        assertEq(reqId2, 1, "second request should be id 1");
+        assertEq(withdrawalQueue.pendingCount(), 2);
+
+        // Repay loan to free liquidity
+        vm.warp(block.timestamp + 365 days);
+        uint256 interest = loanManager.accrue(0);
+        usdc.mint(borrower1, loanPrincipal + interest);
+        vm.startPrank(borrower1);
+        usdc.approve(address(loanManager), loanPrincipal + interest);
+        loanManager.repay(0);
+        vm.stopPrank();
+
+        // Process queue — should handle both in FIFO order
+        uint256 processed = withdrawalQueue.processQueue(10);
+        assertEq(processed, 2, "both requests should be processed");
+        assertEq(withdrawalQueue.pendingCount(), 0, "no pending requests");
+
+        // Both LPs should have received USDC
+        assertGt(usdc.balanceOf(lp1), 0, "lp1 got USDC from queue");
+        assertGt(usdc.balanceOf(lp2), 0, "lp2 got USDC from queue");
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    //  13. ERC4626 SYMMETRY — deposit/mint AND withdraw/redeem
+    // ══════════════════════════════════════════════════════════════
+
+    /// @dev previewDeposit and previewRedeem should be consistent inverses.
+    function testFuzz_erc4626PreviewConsistency(uint256 amount) public {
+        amount = _boundDeposit(amount);
+
+        // Seed the vault so share price != 1:1
+        _depositAs(makeAddr("lpSeed"), 50_000e6);
+        _createAndFundLoan(25_000e6, 1000, 365 days);
+        vm.warp(block.timestamp + 180 days);
+        uint256 interest = loanManager.accrue(0);
+        usdc.mint(borrower1, 25_000e6 + interest);
+        vm.startPrank(borrower1);
+        usdc.approve(address(loanManager), 25_000e6 + interest);
+        loanManager.repay(0);
+        vm.stopPrank();
+
+        // Preview: how many shares for `amount` assets?
+        uint256 previewedShares = vault.previewDeposit(amount);
+
+        // Preview: how many assets for those shares?
+        uint256 previewedAssets = vault.previewRedeem(previewedShares);
+
+        // Due to rounding, previewedAssets should be <= amount (ERC4626 favors vault)
+        assertLe(previewedAssets, amount, "ERC4626 must round in vault's favor");
+
+        // But the difference should be negligible (at most 1 unit of asset per share)
+        assertApproxEqAbs(previewedAssets, amount, previewedShares, "round-trip too lossy");
+    }
 }
